@@ -19,47 +19,81 @@ fn main() {
     }
 }
 
-#[derive(Eq, PartialEq)]
-struct Node {
-    is_leaf: bool,
-    character: Option<char>,
-    count: u32,
-    left: Option<Box<Node>>,
-    right:  Option<Box<Node>>
+#[derive(Debug, Clone)]
+enum HuffmanNode {
+    Internal { left: Box<HuffmanNode>, right: Box<HuffmanNode> },
+    Leaf { character: char, frequency: usize },
 }
 
-impl Node {
-    fn new_leaf(character: char, count: u32) -> Node {
-        Node {
-            is_leaf: true,
-            character: Some(character),
-            count,
-            left: None,
-            right: None
+impl HuffmanNode {
+    fn frequency(&self) -> usize {
+        match self {
+            HuffmanNode::Internal { left, right } => left.frequency() + right.frequency(),
+            HuffmanNode::Leaf { frequency, .. } => *frequency,
         }
     }
 }
 
-impl Ord for Node {
+impl Ord for HuffmanNode {
     fn cmp(&self, other: &Self) -> Ordering {
-        other.count.cmp(&self.count)
+        let ordering = other.frequency().cmp(&self.frequency());
+        if ordering == Ordering::Equal {
+            let HuffmanNode::Leaf { character: self_char, frequency: _ } = self else { return ordering; };
+            let HuffmanNode::Leaf { character, frequency: _ } = other else { return ordering; };
+            character.cmp(self_char)
+        } else {
+            ordering
+        }
     }
 }
 
-impl PartialOrd for Node {
+impl PartialOrd for HuffmanNode {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-fn binary_heap_from_frequencies(frequencies: &HashMap<char, u32>) -> BinaryHeap<Node> {
+impl PartialEq for HuffmanNode {
+    fn eq(&self, other: &Self) -> bool {
+        self.frequency() == other.frequency()
+    }
+}
+
+impl Eq for HuffmanNode {}
+
+fn build_huffman_tree(freq_map: &HashMap<char, usize>) -> HuffmanNode {
+    // Taken from https://opendsa-server.cs.vt.edu/ODSA/Books/CS3/html/Huffman.html
     let mut heap = BinaryHeap::new();
 
-    for (key, value) in frequencies {
-        heap.push(Node::new_leaf(*key, *value));
+    for (&character, &frequency) in freq_map.iter() {
+        heap.push(HuffmanNode::Leaf { character, frequency });
     }
 
-    heap
+    while heap.len() > 1 {
+        let left = heap.pop().unwrap();
+        let right = heap.pop().unwrap();
+
+        let internal = HuffmanNode::Internal {
+            left: Box::new(left),
+            right: Box::new(right),
+        };
+
+        heap.push(internal);
+    }
+
+    heap.pop().unwrap()
+}
+
+fn generate_huffman_codes(node: &HuffmanNode, prefix: String, codes: &mut HashMap<char, String>) {
+    match node {
+        HuffmanNode::Leaf { character, .. } => {
+            codes.insert(*character, prefix);
+        }
+        HuffmanNode::Internal { left, right } => {
+            generate_huffman_codes(left, prefix.clone() + "0", codes);
+            generate_huffman_codes(right, prefix + "1", codes);
+        }
+    }
 }
 
 fn get_frequencies_from_reader<R: BufRead>(reader: &mut R) -> std::io::Result<HashMap<char, u32>> {
@@ -123,7 +157,7 @@ mod tests {
 
     #[test]
     fn test_binary_heap_from_frequencies() {
-        let mut frequencies: HashMap<char, u32> = HashMap::new();
+        let mut frequencies: HashMap<char, usize> = HashMap::new();
         frequencies.insert('C', 32);
         frequencies.insert('D', 42);
         frequencies.insert('E', 120);
@@ -133,14 +167,24 @@ mod tests {
         frequencies.insert('U', 37);
         frequencies.insert('Z', 2);
 
-        let mut heap = binary_heap_from_frequencies(&frequencies);
+        let root = build_huffman_tree(&frequencies);
+        let mut huffman_codes: HashMap<char, String> = HashMap::new();
+        generate_huffman_codes(&root, String::new(), &mut huffman_codes);
 
-        let expected = [2, 7, 24, 32, 37, 42, 42, 120];
+        let expected = HashMap::from([
+            ('M', "11111"),
+            ('D', "101"),
+            ('U', "100"),
+            ('C', "1110"),
+            ('E', "0"),
+            ('K', "111101"),
+            ('L', "110"),
+            ('Z', "111100")
+        ]);
 
-        let mut index = 0;
-        while let Some(node) = heap.pop() {
-            assert_eq!(node.count, expected[index]);
-            index += 1;
+        for (character, code) in &huffman_codes {
+            assert!(expected.get(character).is_some());
+            assert_eq!(code, expected[character]);
         }
     }
 }
